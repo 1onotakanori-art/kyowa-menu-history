@@ -1,0 +1,12 @@
+{
+  "name": "kyowa-menu-history",
+  "version": "1.0.0",
+  "description": "協和メニュー食事履歴 - Supabase移行スクリプト",
+  "type": "module",
+  "scripts": {
+    "migrate": "node scripts/migrate-to-supabase.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.4"
+  }
+}
