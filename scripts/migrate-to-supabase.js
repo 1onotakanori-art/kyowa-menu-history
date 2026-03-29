@@ -1,8 +1,11 @@
 /**
  * migrate-to-supabase.js
  *
- * data/history/ と data/menus/ の既存JSONファイルを
- * Supabaseの meal_history / daily_menus テーブルに移行します。
+ * data/history/ と data/menus/ の既存JSONファイルを Supabase に移行します。
+ *
+ * テーブル対応:
+ *   data/history/*.json  → meal_history テーブル（新規作成）
+ *   data/menus/*.json    → menus テーブル（既存、1行=メニュー1品）
  *
  * 使い方:
  *   1. .env ファイルに SUPABASE_URL と SUPABASE_SERVICE_KEY を設定
@@ -20,8 +23,7 @@ const ROOT = join(__dirname, '..');
 
 // --- 環境変数の読み込み (.env がある場合) ---
 try {
-  const envPath = join(ROOT, '.env');
-  const envContent = readFileSync(envPath, 'utf-8');
+  const envContent = readFileSync(join(ROOT, '.env'), 'utf-8');
   for (const line of envContent.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
@@ -47,7 +49,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
   auth: { persistSession: false },
 });
 
-// --- 食事履歴の移行 ---
+// --- 食事履歴の移行 → meal_history テーブル ---
 async function migrateHistory() {
   const historyDir = join(ROOT, 'data', 'history');
   let files;
@@ -58,8 +60,8 @@ async function migrateHistory() {
     return;
   }
 
-  console.log(`\n📋 食事履歴: ${files.length} 件処理中...`);
-  let success = 0, skipped = 0, errors = 0;
+  console.log(`\n📋 食事履歴 (meal_history): ${files.length} 件処理中...`);
+  let success = 0, errors = 0;
 
   for (const file of files) {
     const date = file.replace('.json', '');
@@ -97,7 +99,7 @@ async function migrateHistory() {
   console.log(`  完了: 成功 ${success}, エラー ${errors}`);
 }
 
-// --- 日別メニューの移行 ---
+// --- 日別メニューの移行 → 既存 menus テーブル（1行=1品）---
 async function migrateMenus() {
   const menusDir = join(ROOT, 'data', 'menus');
   let files;
@@ -110,30 +112,48 @@ async function migrateMenus() {
     return;
   }
 
-  console.log(`\n🍽️  日別メニュー: ${files.length} 件処理中...`);
+  console.log(`\n🍽️  日別メニュー (menus): ${files.length} ファイル処理中...`);
   let success = 0, errors = 0;
 
   for (const file of files) {
     const date = file.replace('.json', '');
     try {
       const raw = JSON.parse(readFileSync(join(menusDir, file), 'utf-8'));
+      const items = Array.isArray(raw.menus) ? raw.menus : [];
 
-      const record = {
+      if (items.length === 0) {
+        console.log(`  - ${file}: メニューなし、スキップ`);
+        continue;
+      }
+
+      // 既存テーブルのスキーマに合わせて1品1行で挿入
+      // 重複を避けるため、同じ date の既存データを先に削除してから insert
+      const { error: delError } = await supabase
+        .from('menus')
+        .delete()
+        .eq('date', date);
+
+      if (delError) {
+        console.error(`  ✗ ${file} (削除): ${delError.message}`);
+        errors++;
+        continue;
+      }
+
+      const records = items.map(item => ({
         date,
-        date_label: raw.dateLabel || null,
-        count: raw.count || (Array.isArray(raw.menus) ? raw.menus.length : 0),
-        menus: raw.menus || [],
-      };
+        menu_name: item.name,
+        nutrition: item.nutrition || {},
+      }));
 
       const { error } = await supabase
-        .from('daily_menus')
-        .upsert(record, { onConflict: 'date' });
+        .from('menus')
+        .insert(records);
 
       if (error) {
         console.error(`  ✗ ${file}: ${error.message}`);
         errors++;
       } else {
-        console.log(`  ✓ ${file}`);
+        console.log(`  ✓ ${file} (${items.length} 品)`);
         success++;
       }
     } catch (err) {
