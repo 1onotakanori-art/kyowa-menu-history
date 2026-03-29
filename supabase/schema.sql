@@ -48,7 +48,17 @@ CREATE POLICY "service_role full access on meal_history"
   USING (auth.role() = 'service_role')
   WITH CHECK (auth.role() = 'service_role');
 
--- anon / authenticated は読み取りのみ
+-- anon / authenticated は読み取り可能
 CREATE POLICY "public read meal_history"
   ON meal_history FOR SELECT
   USING (true);
+
+-- anon / authenticated はINSERTおよびUPDATE可能
+CREATE POLICY "public write meal_history"
+  ON meal_history FOR INSERT
+  WITH CHECK (true);
+
+CREATE POLICY "public update meal_history"
+  ON meal_history FOR UPDATE
+  USING (true)
+  WITH CHECK (true);
